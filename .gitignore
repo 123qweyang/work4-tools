@@ -1,0 +1,16 @@
+# 构建产物
+build/
+
+# 运行时索引数据（含完整文件路径，仅本地使用，勿入库）
+index/
+
+# Python 工具脚本的缓存
+__pycache__/
+*.pyc
+
+# 编辑器 / 系统文件
+.vs/
+.vscode/
+*.user
+Thumbs.db
+Desktop.ini
