@@ -7,7 +7,7 @@
   - `ui.cpp` — 控件创建、布局、深色模式、图标、列表列
   - `index.cpp` — 多线程全盘扫描、内存索引、二进制持久化
   - `search.cpp` — 并行索引搜索与实时扫描兜底
-  - `worker.cpp` — 可复用任务池（可绑定 E-core）
+  - `worker.cpp` — 可复用任务池（任务内可再派发子任务）
   - `utils.cpp` — 路径/字符串工具、格式化、日志
   - `app.h` — 共享 `App` 状态与控件 ID
 - `resources/` — `app.rc`、`app.manifest`、`app.ico`
@@ -21,7 +21,7 @@
 - 冒烟测试：`powershell -ExecutionPolicy Bypass -File tools\smoke-test.ps1`
   - 验证窗口创建、目录浏览、索引构建和搜索。
 - 稳定性检查：`tools\resize-test.ps1`（缩放/最大化）、`tools\layout-check.ps1`（控件几何）。
-- 功能检查：`tools\verify-dark-highlight.ps1`（深色模式与高亮）、`tools\monitor-ecore.ps1`（E-core 绑定）。
+- 功能检查：`tools\verify-dark-highlight.ps1`（深色模式与高亮）。
 - 重新生成图标：`python tools\make-icon.py`。
 
 ## 编码风格与命名约定
@@ -41,12 +41,14 @@
 
 ## 提交与 Pull Request 约定
 
-仓库尚未初始化 Git。初始化后采用 Conventional Commits 风格，一个逻辑改动一个提交：
+采用 Conventional Commits 风格，一个逻辑改动一个提交：
 
 - `feat(ui): 新增深色模式切换按钮`
 - `fix(index): 修复浅色模式目录树背景残留`
+- `docs: 同步过时描述`
 
 PR 需说明改动内容与原因，UI 改动附截图，并报告已运行的验证脚本。
+提交身份为仓库级配置（`user.name=123qweyang`），不依赖全局 Git 配置。
 
 ## 安全与配置提示
 
