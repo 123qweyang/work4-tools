@@ -746,6 +746,79 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         case WM_DRAWITEM: {
             DRAWITEMSTRUCT* dis = (DRAWITEMSTRUCT*)lParam;
             if (dis->CtlType != ODT_BUTTON || !dis->hwndItem) break;
+            // "显示隐藏文件"复选框：自绘勾选框 + 文字，适配深浅色模式
+            // （主题化复选框忽略 CTLCOLOR 文字色，深色模式下文字会保持黑色不可见）
+            if (dis->CtlID == (UINT)IDC_HIDDEN) {
+                HDC hdc = dis->hDC;
+                RECT rc = dis->rcItem;
+                // BS_OWNERDRAW 按钮不保存勾选状态（BM_GETCHECK 恒为 0），
+                // 状态由应用自己的 g_app.showHidden 管理
+                bool checked = g_app.showHidden;
+                bool disabled = (dis->itemState & ODS_DISABLED) != 0;
+                bool focus = (dis->itemState & ODS_FOCUS) != 0;
+                const bool dark = g_app.darkMode;
+
+                COLORREF bg = dark ? RGB(32, 32, 32)
+                                   : (COLORREF)GetSysColor(COLOR_WINDOW);
+                COLORREF fg = disabled ? (dark ? RGB(120, 120, 120) : RGB(160, 160, 160))
+                                       : (dark ? RGB(235, 235, 235) : RGB(25, 25, 25));
+                COLORREF boxBorder = disabled ? (dark ? RGB(80, 80, 80) : RGB(190, 190, 190))
+                                              : (dark ? RGB(130, 130, 130) : RGB(110, 110, 110));
+                COLORREF boxFill = checked ? (dark ? RGB(56, 189, 248) : RGB(0, 102, 204))
+                                           : (dark ? RGB(45, 45, 45) : RGB(250, 250, 250));
+
+                HBRUSH bgBr = CreateSolidBrush(bg);
+                FillRect(hdc, &rc, bgBr);
+                DeleteObject(bgBr);
+
+                int box = MulDiv(15, g_app.dpi, 96);
+                int boxX = rc.left + MulDiv(4, g_app.dpi, 96);
+                int boxY = rc.top + (rc.bottom - rc.top - box) / 2;
+
+                HBRUSH bf = CreateSolidBrush(boxFill);
+                HPEN bp = CreatePen(PS_SOLID, 1, boxBorder);
+                HGDIOBJ oPen = SelectObject(hdc, bp);
+                HGDIOBJ oBr = SelectObject(hdc, bf);
+                Rectangle(hdc, boxX, boxY, boxX + box, boxY + box);
+                SelectObject(hdc, oPen);
+                SelectObject(hdc, oBr);
+                DeleteObject(bp);
+                DeleteObject(bf);
+
+                if (checked) {
+                    HPEN cp = CreatePen(PS_SOLID, std::max(1, MulDiv(2, g_app.dpi, 96)),
+                                        RGB(255, 255, 255));
+                    HGDIOBJ oP = SelectObject(hdc, cp);
+                    int cx = boxX + MulDiv(3, g_app.dpi, 96);
+                    int cy = boxY + box / 2 + MulDiv(1, g_app.dpi, 96);
+                    int mx = boxX + box / 2 - MulDiv(1, g_app.dpi, 96);
+                    int my = boxY + box - MulDiv(4, g_app.dpi, 96);
+                    int ex = boxX + box - MulDiv(3, g_app.dpi, 96);
+                    int ey = boxY + MulDiv(4, g_app.dpi, 96);
+                    MoveToEx(hdc, cx, cy, nullptr);
+                    LineTo(hdc, mx, my);
+                    LineTo(hdc, ex, ey);
+                    SelectObject(hdc, oP);
+                    DeleteObject(cp);
+                }
+
+                SetBkMode(hdc, TRANSPARENT);
+                SetTextColor(hdc, fg);
+                HFONT oldFont = (HFONT)SelectObject(hdc, g_app.hFont);
+                wchar_t text[64];
+                GetWindowTextW(dis->hwndItem, text, 64);
+                RECT tr = rc;
+                tr.left = boxX + box + MulDiv(7, g_app.dpi, 96);
+                DrawTextW(hdc, text, -1, &tr,
+                          DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+                SelectObject(hdc, oldFont);
+                if (focus) {
+                    RECT fr = tr;
+                    InflateRect(&fr, 1, 2);
+                    DrawFocusRect(hdc, &fr);
+                }
+                return TRUE;
+            }
             HDC hdc = dis->hDC;
             RECT rc = dis->rcItem;
             bool pressed = (dis->itemState & ODS_SELECTED) != 0;
@@ -845,7 +918,9 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                     break;
                 case IDC_HIDDEN:
                     if (HIWORD(wParam) == BN_CLICKED) {
-                        g_app.showHidden = IsDlgButtonChecked(hwnd, IDC_HIDDEN) == BST_CHECKED;
+                        // 自绘复选框（BS_OWNERDRAW）不保存勾选状态，直接翻转应用状态
+                        g_app.showHidden = !g_app.showHidden;
+                        InvalidateRect(g_app.hChkHidden, nullptr, TRUE);
                         CheckMenuItem(GetMenu(hwnd), IDM_HIDDEN,
                                       MF_BYCOMMAND |
                                           (g_app.showHidden ? MF_CHECKED : MF_UNCHECKED));
@@ -858,7 +933,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                     break;
                 case IDM_HIDDEN: {
                     g_app.showHidden = !g_app.showHidden;
-                    CheckDlgButton(hwnd, IDC_HIDDEN, g_app.showHidden ? BST_CHECKED : BST_UNCHECKED);
+                    InvalidateRect(g_app.hChkHidden, nullptr, TRUE);
                     CheckMenuItem(GetMenu(hwnd), IDM_HIDDEN,
                                   MF_BYCOMMAND |
                                       (g_app.showHidden ? MF_CHECKED : MF_UNCHECKED));

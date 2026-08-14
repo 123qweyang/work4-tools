@@ -109,7 +109,8 @@ void CreateControls(HWND parent) {
     g_app.hBtnRebuild = MakeButton(parent, IDC_REBUILD, L"重建索引", 0);
     g_app.hBtnDark = MakeButton(parent, IDC_DARK, L"深色模式", 0);
     g_app.hChkHidden = CreateWindowExW(0, L"BUTTON", L"显示隐藏文件",
-                                       WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_AUTOCHECKBOX,
+                                       WS_CHILD | WS_VISIBLE | WS_TABSTOP |
+                                           BS_AUTOCHECKBOX | BS_OWNERDRAW,
                                        0, 0, 0, 0, parent, (HMENU)(INT_PTR)IDC_HIDDEN,
                                        g_app.hInst, nullptr);
 
