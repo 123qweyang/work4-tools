@@ -813,8 +813,10 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                           DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
                 SelectObject(hdc, oldFont);
                 if (focus) {
-                    RECT fr = tr;
-                    InflateRect(&fr, 1, 2);
+                    // 焦点框画在整个控件周围（标准复选框样式）；只框文字区域
+                    // 会在勾选框右侧形成一条突兀的竖虚线
+                    RECT fr = rc;
+                    InflateRect(&fr, -1, -1);
                     DrawFocusRect(hdc, &fr);
                 }
                 return TRUE;
