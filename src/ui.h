@@ -19,6 +19,7 @@ void Layout(HWND hwnd);
 void ApplyFont(HWND parent);
 void SetDarkMode(bool dark);
 void SetListViewMode(HWND hlist, int mode);
+void ReattachHeaderSubclass();  // 列头子类挂接（Header 可能被 ListView 重建，需重挂）
 void AdjustListColumns(HWND hlist, int listW);
 void RefreshList(HWND hlist, size_t count);
 void SetStatusParts(HWND status, int cx);

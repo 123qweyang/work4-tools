@@ -77,6 +77,8 @@ struct App {
     HBRUSH hBrushSplit = nullptr;
     WNDPROC origAddrProc = nullptr;
     WNDPROC origSearchProc = nullptr;
+    WNDPROC origListProc = nullptr;
+    WNDPROC origHeaderProc = nullptr;
 
     int dpi = 96;
     IndexManager index;

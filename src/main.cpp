@@ -6,6 +6,7 @@
 #include <windowsx.h>
 #include <commctrl.h>
 #include <shellapi.h>
+#include <uxtheme.h>
 
 #include <algorithm>
 #include <cwchar>
@@ -553,6 +554,101 @@ LRESULT CALLBACK SearchEditProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     return CallWindowProcW(g_app.origSearchProc, h, m, w, l);
 }
 
+// ListView 子类：拦截其子控件 Header 的 NM_CUSTOMDRAW。
+// Header 的直接父窗口是 ListView——它把通知转发给主窗口，但不会把主窗口的
+// CDRF 返回值回传给 Header，导致列头自绘失效（深色模式下列头仍为亮色）。
+// 因此在 ListView 窗口过程内直接处理并返回 CDRF，让绘制指令直达 Header。
+LRESULT CALLBACK ListProc(HWND h, UINT m, WPARAM w, LPARAM l) {
+    if (m == WM_NOTIFY) {
+        NMHDR* nm = (NMHDR*)l;
+        if (nm->hwndFrom == g_app.hHeader && nm->code == NM_CUSTOMDRAW) {
+            // 列头（名称/大小/类型/修改日期）完全自绘，适配深浅色模式
+            // （Header 的 NMCUSTOMDRAW 不提供 clrText/clrTextBk，必须自绘）
+            NMCUSTOMDRAW* cd = (NMCUSTOMDRAW*)l;
+            if (cd->dwDrawStage == CDDS_PREPAINT) {
+                return CDRF_NOTIFYITEMDRAW;
+            }
+            if (cd->dwDrawStage == CDDS_ITEMPREPAINT) {
+                HDC hdc = cd->hdc;
+                RECT rc = cd->rc;
+                const bool dark = g_app.darkMode;
+                COLORREF bg = dark ? RGB(32, 32, 32)
+                                   : (COLORREF)GetSysColor(COLOR_WINDOW);
+                if (cd->uItemState & CDIS_SELECTED) {
+                    bg = dark ? RGB(48, 48, 48) : RGB(232, 232, 232);
+                }
+                HBRUSH br = CreateSolidBrush(bg);
+                FillRect(hdc, &rc, br);
+                DeleteObject(br);
+
+                wchar_t buf[128] = {};
+                HDITEMW hdi{};
+                hdi.mask = HDI_TEXT;
+                hdi.pszText = buf;
+                hdi.cchTextMax = 127;
+                if (SendMessageW(nm->hwndFrom, HDM_GETITEMW, (WPARAM)(int)cd->dwItemSpec,
+                                 (LPARAM)&hdi)) {
+                    SetBkMode(hdc, TRANSPARENT);
+                    SetTextColor(hdc, dark ? RGB(235, 235, 235)
+                                           : (COLORREF)GetSysColor(COLOR_WINDOWTEXT));
+                    HGDIOBJ oldFont = nullptr;
+                    if (g_app.hFont) {
+                        oldFont = (HGDIOBJ)SelectObject(hdc, g_app.hFont);
+                    }
+                    RECT tr = rc;
+                    tr.left += MulDiv(8, g_app.dpi, 96);
+                    tr.right -= MulDiv(4, g_app.dpi, 96);
+                    DrawTextW(hdc, buf, -1, &tr, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+                    if (oldFont) SelectObject(hdc, oldFont);
+                }
+                // 列间分隔线：画在本项右缘（相邻项背景从其 rc.left 起，不会覆盖此线）。
+                // 不用 ITEMPOSTPAINT——CDRF_SKIPDEFAULT 会抑制后续通知，实测 POSTPAINT 不触发。
+                COLORREF sep = dark ? RGB(70, 70, 70) : RGB(205, 205, 205);
+                HPEN pen = CreatePen(PS_SOLID, 1, sep);
+                HGDIOBJ oldPen = (HGDIOBJ)SelectObject(hdc, pen);
+                MoveToEx(hdc, rc.right - 1, rc.top, nullptr);
+                LineTo(hdc, rc.right - 1, rc.bottom);
+                SelectObject(hdc, oldPen);
+                DeleteObject(pen);
+                return CDRF_SKIPDEFAULT;
+            }
+        }
+    }
+    return CallWindowProcW(g_app.origListProc, h, m, w, l);
+}
+
+// Header 子类：经典样式的 3D 顶边框（亮白 + 灰两条线）在深色模式下刺眼，用背景色覆盖。
+LRESULT CALLBACK HeaderProc(HWND h, UINT m, WPARAM w, LPARAM l) {
+    if (m == WM_PAINT) {
+        LRESULT r = CallWindowProcW(g_app.origHeaderProc, h, m, w, l);
+        HDC hdc = GetDC(h);
+        RECT rc;
+        GetClientRect(h, &rc);
+        COLORREF bg = g_app.darkMode ? RGB(32, 32, 32)
+                                     : (COLORREF)GetSysColor(COLOR_WINDOW);
+        HBRUSH br = CreateSolidBrush(bg);
+        RECT top{rc.left, rc.top, rc.right, rc.top + 2};
+        FillRect(hdc, &top, br);
+        DeleteObject(br);
+        ReleaseDC(h, hdc);
+        return r;
+    }
+    return CallWindowProcW(g_app.origHeaderProc, h, m, w, l);
+}
+
+}  // namespace
+
+void ui::ReattachHeaderSubclass() {
+    if (!g_app.hHeader) return;
+    SetWindowTheme(g_app.hHeader, L"", L"");
+    // 同一窗口重复挂接时 SetWindowLongPtrW 会返回 HeaderProc 自身，
+    // 此时不能覆写 origHeaderProc（否则 CallWindowProcW 无限递归导致栈溢出）
+    WNDPROC prev = (WNDPROC)SetWindowLongPtrW(g_app.hHeader, GWLP_WNDPROC, (LONG_PTR)HeaderProc);
+    if (prev != HeaderProc) {
+        g_app.origHeaderProc = prev;
+    }
+}
+
 LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     switch (msg) {
         case WM_CREATE: {
@@ -565,6 +661,9 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             g_app.hBrushSplit = CreateSolidBrush(RGB(205, 205, 205));
             BuildMenu(hwnd);
             ui::CreateControls(hwnd);
+            // 列头自绘需在 ListView 窗口过程内处理（见 ListProc 注释）
+            g_app.origListProc =
+                (WNDPROC)SetWindowLongPtrW(g_app.hList, GWLP_WNDPROC, (LONG_PTR)ListProc);
             // CPU 线程数在运行期间不会变化，只初始化计算一次
             g_app.statusThreadText =
                 L"CPU线程数 " + std::to_wstring(std::thread::hardware_concurrency());
@@ -991,70 +1090,6 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                         break;
                     }
                 }
-            } else if (nm->hwndFrom == g_app.hHeader) {
-                switch (nm->code) {
-                    case NM_CUSTOMDRAW: {
-                        // 列头（名称/大小/类型/修改日期）完全自绘，适配深浅色模式
-                        // （Header 的 NMCUSTOMDRAW 不提供 clrText/clrTextBk，必须自绘）
-                        NMCUSTOMDRAW* cd = (NMCUSTOMDRAW*)lParam;
-                        if (cd->dwDrawStage == CDDS_PREPAINT) {
-                            return CDRF_NOTIFYITEMDRAW;
-                        }
-                        if (cd->dwDrawStage == CDDS_ITEMPREPAINT) {
-                            HDC hdc = cd->hdc;
-                            RECT rc = cd->rc;
-                            const bool dark = g_app.darkMode;
-                            COLORREF bg = dark ? RGB(32, 32, 32)
-                                               : (COLORREF)GetSysColor(COLOR_WINDOW);
-                            if (cd->uItemState & CDIS_SELECTED) {
-                                bg = dark ? RGB(48, 48, 48) : RGB(232, 232, 232);
-                            }
-                            HBRUSH br = CreateSolidBrush(bg);
-                            FillRect(hdc, &rc, br);
-                            DeleteObject(br);
-
-                            wchar_t buf[128] = {};
-                            HDITEMW hdi{};
-                            hdi.mask = HDI_TEXT;
-                            hdi.pszText = buf;
-                            hdi.cchTextMax = 127;
-                            if (SendMessageW(nm->hwndFrom, HDM_GETITEMW,
-                                             (WPARAM)(int)cd->dwItemSpec,
-                                             (LPARAM)&hdi)) {
-                                SetBkMode(hdc, TRANSPARENT);
-                                SetTextColor(hdc, dark ? RGB(235, 235, 235)
-                                                       : (COLORREF)GetSysColor(
-                                                             COLOR_WINDOWTEXT));
-                                HGDIOBJ oldFont = nullptr;
-                                if (g_app.hFont) {
-                                    oldFont = (HGDIOBJ)SelectObject(hdc, g_app.hFont);
-                                }
-                                RECT tr = rc;
-                                tr.left += MulDiv(8, g_app.dpi, 96);
-                                tr.right -= MulDiv(4, g_app.dpi, 96);
-                                DrawTextW(hdc, buf, -1, &tr,
-                                          DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-                                if (oldFont) SelectObject(hdc, oldFont);
-                            }
-                            return CDRF_SKIPDEFAULT | CDRF_NOTIFYPOSTPAINT;
-                        }
-                        if (cd->dwDrawStage == CDDS_ITEMPOSTPAINT) {
-                            // 所有列头项绘制完成后补画分隔线，避免被相邻项背景覆盖
-                            HDC hdc = cd->hdc;
-                            RECT rc = cd->rc;
-                            COLORREF sep = g_app.darkMode ? RGB(70, 70, 70)
-                                                          : RGB(205, 205, 205);
-                            HPEN pen = CreatePen(PS_SOLID, 1, sep);
-                            HGDIOBJ oldPen = (HGDIOBJ)SelectObject(hdc, pen);
-                            MoveToEx(hdc, rc.right - 1, rc.top, nullptr);
-                            LineTo(hdc, rc.right - 1, rc.bottom);
-                            SelectObject(hdc, oldPen);
-                            DeleteObject(pen);
-                            return CDRF_DODEFAULT;
-                        }
-                        break;
-                    }
-                }
             }
             break;
         }
@@ -1140,8 +1175,6 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     }
     return DefWindowProcW(hwnd, msg, wParam, lParam);
 }
-
-}  // namespace
 
 int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int nCmdShow) {
     g_app.hInst = hInstance;

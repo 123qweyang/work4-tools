@@ -307,6 +307,10 @@ void SetListViewMode(HWND hlist, int mode) {
         col.pszText = (LPWSTR)cols[i].title;
         ListView_InsertColumn(hlist, (int)i, &col);
     }
+    // 增删列可能导致 Header 控件被重建：重新获取句柄，并重挂子类/保持经典样式
+    // （列头自绘依赖 g_app.hHeader，见 main.cpp ListProc）
+    g_app.hHeader = ListView_GetHeader(hlist);
+    ReattachHeaderSubclass();
 }
 
 // 根据列表实际宽度调整列宽：浏览模式弹性拉宽"名称"，搜索模式弹性拉宽"路径"
